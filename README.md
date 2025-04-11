@@ -1,2 +1,2 @@
 # muduo
-<img src="./1.png>
+![avatar](1.png)
