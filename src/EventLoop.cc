@@ -1,8 +1,9 @@
 #include <sys/eventfd.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <error.h>
+#include <errno.h>
 #include <memory>
+
 #include "EventLoop.h"
 #include "Logger.h"
 #include "Channel.h"
@@ -11,8 +12,8 @@
 // 防止一个线程创建多个EventLoop
 __thread EventLoop *t_loopInThisThread = nullptr;
 
-// 定义默认的Poller IO复用接口的超时事件
-const int kPollTimeMs = 10000; // 10秒
+// 定义默认的Poller IO复用接口的超时时间
+const int kPollTimeMs = 10000; // 10000毫秒 = 10秒钟
 
 /* 创建线程之后主线程和子线程谁先运行是不确定的。
  * 通过一个eventfd在线程之间传递数据的好处是多个线程无需上锁就可以实现同步。
@@ -32,7 +33,7 @@ const int kPollTimeMs = 10000; // 10秒
 // 创建wakeupfd 用来notify唤醒subReactor处理新来的channel
 int createEventfd()
 {
-    int evtfd = ::eventfd(0,EFD_NONBLOCK | EFD_CLOEXEC);
+    int evtfd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     if (evtfd < 0)
     {
         LOG_FATAL("eventfd error:%d\n", errno);
@@ -50,7 +51,7 @@ EventLoop::EventLoop()
     , wakeupChannel_(new Channel(this, wakeupFd_))
 {
     LOG_DEBUG("EventLoop created %p in thread %d\n", this, threadId_);
-    if(t_loopInThisThread)
+    if (t_loopInThisThread)
     {
         LOG_FATAL("Another EventLoop %p exists in this thread %d\n", t_loopInThisThread, threadId_);
     }
@@ -58,15 +59,16 @@ EventLoop::EventLoop()
     {
         t_loopInThisThread = this;
     }
-
-    wakeupChannel_->setReadCallback(std::bind(&EventLoop::handleRead, this)); // 设置wakeupfd的事件类型以及发生事件后的回调操作
+    
+    wakeupChannel_->setReadCallback(
+        std::bind(&EventLoop::handleRead, this)); // 设置wakeupfd的事件类型以及发生事件后的回调操作
+    
     wakeupChannel_->enableReading(); // 每一个EventLoop都将监听wakeupChannel_的EPOLL读事件了
 }
-
 EventLoop::~EventLoop()
 {
-    wakeupChannel_->disableAll(); // 给channel移除所有感兴趣的事件
-    wakeupChannel_->remove(); // 从Channel从eventloop上删除掉
+    wakeupChannel_->disableAll(); // 给Channel移除所有感兴趣的事件
+    wakeupChannel_->remove();     // 把Channel从EventLoop上删除掉
     ::close(wakeupFd_);
     t_loopInThisThread = nullptr;
 }
@@ -77,13 +79,13 @@ void EventLoop::loop()
     looping_ = true;
     quit_ = false;
 
-    LOG_INFO("EventLoop %p start looping\n",this);
+    LOG_INFO("EventLoop %p start looping\n", this);
 
-    while(!quit_)
+    while (!quit_)
     {
         activeChannels_.clear();
-        pollRetureTime_ = poller_->poll(kPollTimeMs,&activeChannels_);
-        for(Channel *channel : activeChannels_)
+        pollRetureTime_ = poller_->poll(kPollTimeMs, &activeChannels_);
+        for (Channel *channel : activeChannels_)
         {
             // Poller监听哪些channel发生了事件 然后上报给EventLoop 通知channel处理相应的事件
             channel->handleEvent(pollRetureTime_);
@@ -113,20 +115,21 @@ void EventLoop::loop()
 void EventLoop::quit()
 {
     quit_ = true;
-    if(!isInLoopThread())
+
+    if (!isInLoopThread())
     {
-        wakeup(); // 唤醒EventLoop所在的线程
+        wakeup();
     }
 }
 
 // 在当前loop中执行cb
 void EventLoop::runInLoop(Functor cb)
 {
-    if(isInLoopThread()) // 当前EventLoop中执行回调
+    if (isInLoopThread()) // 当前EventLoop中执行回调
     {
         cb();
     }
-    else    // 在非当前EventLoop线程中执行cb，就需要唤醒EventLoop所在线程执行cb
+    else // 在非当前EventLoop线程中执行cb，就需要唤醒EventLoop所在线程执行cb
     {
         queueInLoop(cb);
     }
@@ -139,7 +142,8 @@ void EventLoop::queueInLoop(Functor cb)
         std::unique_lock<std::mutex> lock(mutex_);
         pendingFunctors_.emplace_back(cb);
     }
-     /**
+
+    /**
      * || callingPendingFunctors的意思是 当前loop正在执行回调中 但是loop的pendingFunctors_中又加入了新的回调 需要通过wakeup写事件
      * 唤醒相应的需要执行上面回调操作的loop的线程 让loop()下一次poller_->poll()不再阻塞（阻塞的话会延迟前一次新加入的回调的执行），然后
      * 继续执行pendingFunctors_中的回调函数
@@ -148,7 +152,6 @@ void EventLoop::queueInLoop(Functor cb)
     {
         wakeup(); // 唤醒loop所在线程
     }
-
 }
 
 void EventLoop::handleRead()
@@ -198,9 +201,10 @@ void EventLoop::doPendingFunctors()
         functors.swap(pendingFunctors_); // 交换的方式减少了锁的临界区范围 提升效率 同时避免了死锁 如果执行functor()在临界区内 且functor()中调用queueInLoop()就会产生死锁
     }
 
-    for(const Functor &functor : functors)
+    for (const Functor &functor : functors)
     {
-        functor();  // 执行当前loop需要执行的回调操作
+        functor(); // 执行当前loop需要执行的回调操作
     }
+
     callingPendingFunctors_ = false;
 }

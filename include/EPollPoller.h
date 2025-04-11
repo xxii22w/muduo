@@ -11,7 +11,7 @@
  * 1. epoll_create
  * 2. epoll_ctl (add, mod, del)
  * 3. epoll_wait
-**/
+ **/
 
 class Channel;
 

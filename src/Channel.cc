@@ -1,20 +1,21 @@
 #include <sys/epoll.h>
+
 #include "Channel.h"
 #include "EventLoop.h"
 #include "Logger.h"
 
-const int Channel::kNoneEvent = 0; // 空事件
-const int Channel::kReadEvent = EPOLLIN | EPOLLPRI; // 读事件
-const int Channel::kWriteEvent = EPOLLOUT; // 写事件
+const int Channel::kNoneEvent = 0; //空事件
+const int Channel::kReadEvent = EPOLLIN | EPOLLPRI; //读事件
+const int Channel::kWriteEvent = EPOLLOUT; //写事件
 
 // EventLoop: ChannelList Poller
 Channel::Channel(EventLoop *loop, int fd)
-    : loop_(loop),
-      fd_(fd),
-      events_(0),
-      revents_(0),
-      index_(-1), // Channel在Poller中的索引
-      tied_(false)
+    : loop_(loop)
+    , fd_(fd)
+    , events_(0)
+    , revents_(0)
+    , index_(-1)
+    , tied_(false)
 {
 }
 
@@ -29,13 +30,12 @@ Channel::~Channel()
  * 此处用tie去解决TcpConnection和Channel的生命周期时长问题，从而保证了Channel对象能够在
  * TcpConnection销毁前销毁。
  **/
-void Channel::tie(const std::shared_ptr<void>& obj)
+void Channel::tie(const std::shared_ptr<void> &obj)
 {
     tie_ = obj;
     tied_ = true;
 }
-
-// update 和remove => EpollPoller 更新channel在poller中的状态
+//update 和remove => EpollPoller 更新channel在poller中的状态
 /**
  * 当改变channel所表示的fd的events事件后，update负责再poller里面更改fd相应的事件epoll_ctl
  **/
@@ -45,7 +45,7 @@ void Channel::update()
     loop_->updateChannel(this);
 }
 
-// 在channel所属的Eventloop中把当前的channel删除掉
+// 在channel所属的EventLoop中把当前的channel删除掉
 void Channel::remove()
 {
     loop_->removeChannel(this);
@@ -60,7 +60,7 @@ void Channel::handleEvent(Timestamp receiveTime)
         {
             handleEventWithGuard(receiveTime);
         }
-        // 如果提升失败了 就不做任何处理 说明Channel的TcpConnection对象以及不存在了
+        // 如果提升失败了 就不做任何处理 说明Channel的TcpConnection对象已经不存在了
     }
     else
     {
@@ -70,9 +70,9 @@ void Channel::handleEvent(Timestamp receiveTime)
 
 void Channel::handleEventWithGuard(Timestamp receiveTime)
 {
-    LOG_INFO("channel handleEvent revents:%d\n",revents_);
+    LOG_INFO("channel handleEvent revents:%d\n", revents_);
     // 关闭
-    if((revents_ & EPOLLHUP) && !(revents_ & EPOLLIN)) // 当TcpConnection对应Channel 通过shutdown 关闭写端 epoll触发EPOLLHUP
+    if ((revents_ & EPOLLHUP) && !(revents_ & EPOLLIN)) // 当TcpConnection对应Channel 通过shutdown 关闭写端 epoll触发EPOLLHUP
     {
         if (closeCallback_)
         {
@@ -80,7 +80,7 @@ void Channel::handleEventWithGuard(Timestamp receiveTime)
         }
     }
     // 错误
-    if(revents_ & EPOLLERR)
+    if (revents_ & EPOLLERR)
     {
         if (errorCallback_)
         {
